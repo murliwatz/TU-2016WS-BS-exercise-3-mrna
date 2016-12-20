@@ -16,4 +16,8 @@ static void print_commands(void);
 
 static void free_resources(void);
 
+static char get_codon(char *bases);
+
+static char *get_mrna(char* dna, int* borders);
+
 #endif
