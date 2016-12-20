@@ -1,5 +1,5 @@
 /**
- * @file websh.h
+ * @file mrna-server.h
  * @brief header file for the implementation of mrna-server
  * @author Paul Pröll, 1525669
  * @date 2016-11-15

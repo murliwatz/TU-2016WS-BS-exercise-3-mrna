@@ -1,6 +1,6 @@
 /**
- * @file websh.c
- * @brief main c file for the implementation of mrna-server
+ * @file mrna-client.c
+ * @brief main c file for the implementation of mrna-client
  * @author Paul Pröll, 1525669
  * @date 2016-11-15
  */
