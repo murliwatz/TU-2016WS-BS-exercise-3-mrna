@@ -14,4 +14,8 @@ static void parse_args(int argc, char** argv);
 
 static void free_resources(void);
 
+static char get_codon(char *bases);
+
+static char *get_mrna(char* dna, int* pos);
+
 #endif

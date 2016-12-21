@@ -21,9 +21,10 @@
 /** struct for shared memory */
 static struct sm_data {
     bool c_set; /* 1 - client has set the data, 0 - server has set the data */
-    int cur; /* cursor in dna */
-    char data[4096];
-};
+    int pos_start;
+    int pos_end;
+    char payload[4096];
+} sm_data;
 
 /** name of this program */
 static char* progname;
@@ -43,16 +44,16 @@ int main(int argc, char** argv) {
         bail_out(EXIT_FAILURE, "create shared memory");
     }
 
-    struct sm_data *data;
+    struct sm_data *data = &sm_data;
 
     if((data = shmat(shmid, 0, 0)) == NULL) {
         bail_out(EXIT_FAILURE, "attatch shared memory");
     }
 
-    data->c_set = 1;
-    data->cur = 0;
-
 	char buffer[4096];
+	int pos[2];
+	pos[0] = 0;
+	pos[1] = 0;
 
 	while(arg != 'q') {
 
@@ -88,22 +89,31 @@ int main(int argc, char** argv) {
 				}
 			}
 
-			if(strlen(buffer) % 3 != 0) {
-				bail_out(EXIT_FAILURE, "wrong dna length");
-			}
-
-			fprintf(stderr, "%s\n", buffer);
-
 		}
 
 		if(arg == 'n') { 
 
-			char *mrna = NULL;
-			int borders[2];
-			mrna = get_mrna(buffer, borders);
+			memcpy(data->payload, buffer, 4096);
+			data->pos_start = pos[0];
+    		data->pos_end = pos[1];
+			data->c_set = 1;
 
-			fprintf(stdout, "Protein sequence found [%d/%lu] to [%d/%lu]: %s \n", borders[0], strlen(buffer), borders[1], strlen(buffer), mrna);
+			while(data->c_set);
+
+			pos[0] = data->pos_end;
+			pos[1] = data->pos_end;
+
+			if(data->pos_start == data->pos_end) {
+				fprintf(stdout, "End reached [%d/%lu], send r to reset.\n", data->pos_start, strlen(buffer));
+			} else {
+				fprintf(stdout, "Protein sequence found [%d/%lu] to [%d/%lu]: %s \n", data->pos_start, strlen(buffer), data->pos_end, strlen(buffer), data->payload);
+			}
 		
+		}
+
+		if(arg == 'r') {
+			pos[0] = 0;
+			pos[1] = 0;
 		}
 
 	}
@@ -171,163 +181,4 @@ static void print_commands(void) {
 	fprintf(stdout, "%s\n", " n - show next protein sequence in active mRNA sequence");
 	fprintf(stdout, "%s\n", " r - reset active mRNA sequence");
 	fprintf(stdout, "%s\n", " q - close this client");
-}
-
-/*
- * @brief Returns a codon by bases
- */
-static char get_codon(char *bases) {
-	for(int i = 0; i < 3; i++) {
-		if(bases[i] != 'A' && bases[i] != 'C' && bases[i] != 'G' && bases[i] != 'U') {
-			bail_out(EXIT_FAILURE, "Not a correct base");
-		}
-	}
-
-	char codon = 0;
-
-	switch(bases[0]) {
-		case 'U':
-			if(bases[1] == 'U') {
-				if(bases[2] == 'U' || bases[2] == 'C') {
-					codon = 'F';
-				}
-				if(bases[2] == 'A' || bases[2] == 'G') {
-					codon = 'L';
-				}
-			}
-			if(bases[1] == 'C') {
-				codon = 'S';
-			}
-			if(bases[1] == 'A') {
-				if(bases[2] == 'U' || bases[2] == 'C') {
-					codon = 'Y';
-				}
-				if(bases[2] == 'A' || bases[2] == 'G') {
-					codon = 0;
-				}
-			}
-			if(bases[1] == 'G') {
-				if(bases[2] == 'U' || bases[2] == 'C') {
-					codon = 'C';
-				}
-				if(bases[2] == 'G') {
-					codon = 'W';
-				}
-			}
-			break;
-		case 'C':
-			if(bases[1] == 'U') {
-				codon = 'L';
-			}
-			if(bases[1] == 'C') {
-				codon = 'P';
-			}
-			if(bases[1] == 'A') {
-				if(bases[2] == 'U' || bases[2] == 'C') {
-					codon = 'H';
-				}
-				if(bases[2] == 'A' || bases[2] == 'G') {
-					codon = 'Q';
-				}
-			}
-			if(bases[1] == 'G') {
-				codon = 'R';
-			}
-			break;
-		case 'A':
-			if(bases[1] == 'U') {
-				if(bases[2] == 'U' || bases[2] == 'C' || bases[2] == 'A') {
-					codon = 'I';
-				}
-				if(bases[2] == 'G') {
-					codon = 'M';
-				}
-			}
-			if(bases[1] == 'C') {
-				codon = 'T';
-			}
-			if(bases[1] == 'A') {
-				if(bases[2] == 'U' || bases[2] == 'C') {
-					codon = 'N';
-				}
-				if(bases[2] == 'A' || bases[2] == 'G') {
-					codon = 'K';
-				}
-			}
-			if(bases[1] == 'G') {
-				if(bases[2] == 'U' || bases[2] == 'C') {
-					codon = 'S';
-				}
-				if(bases[2] == 'A' || bases[2] == 'G') {
-					codon = 'R';
-				}
-			}
-			break;
-		case 'G':
-			if(bases[1] == 'U') {
-				codon = 'V';
-			}
-			if(bases[1] == 'C') {
-				codon = 'A';
-			}
-			if(bases[1] == 'A') {
-				if(bases[2] == 'U' || bases[2] == 'C') {
-					codon = 'D';
-				}
-				if(bases[2] == 'A' || bases[2] == 'G') {
-					codon = 'E';
-				}
-			}
-			if(bases[1] == 'G') {
-				codon = 'G';
-			}
-			break;
-	}
-
-	return codon;
-}
-
-/*
- * @brief Returns a mRNA
- */
-static char *get_mrna(char* dna, int* borders) {
-	char* mrna_new = NULL;
-
-	bool started = false;
-
-	int mrna_count = 0;
-
-	int i = 0;
-	while(i < strlen(dna)) {
-		char codon = get_codon(dna + i);
-		if(codon == 'M') {
-			started = true;
-			borders[0] = i + 3;
-		} else if(codon == '\0') {
-			if(started) {
-				borders[1] = i;
-				break;
-			}
-		} else {
-			if(started) {
-				if(mrna_new == NULL) {
-					if((mrna_new = malloc(1)) == NULL) {
-						bail_out(EXIT_FAILURE, "allocation memory");
-					}
-				} else {
-					if((mrna_new = realloc(mrna_new, (mrna_count + 1) + 1)) == NULL) {
-						bail_out(EXIT_FAILURE, "allocation memory");
-					}
-				}
-				mrna_new[mrna_count++] = codon;
-			}
-		}
-		if(started) {
-			i += 3;
-		} else {
-			i++;
-		}
-	}
-
-	return mrna_new;
 }

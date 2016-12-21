@@ -1,5 +1,5 @@
 /**
- * @file websh.h
+ * @file mrna-client.h
  * @brief header file for the implementation of mrna-client
  * @author Paul Pröll, 1525669
  * @date 2016-11-15
@@ -15,9 +15,5 @@ static void parse_args(int argc, char** argv);
 static void print_commands(void);
 
 static void free_resources(void);
-
-static char get_codon(char *bases);
-
-static char *get_mrna(char* dna, int* borders);
 
 #endif
