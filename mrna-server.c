@@ -13,7 +13,17 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/ipc.h> 
+#include <sys/shm.h>
 #include "mrna-server.h"
+
+/** struct for shared memory */
+static struct sm_data {
+    bool c_set; /* 1 - client has set the data, 0 - server has set the data */
+    int cur; /* cursor in dna */
+    char data[4096];
+};
 
 /** name of this program */
 static char* progname; 
@@ -21,6 +31,29 @@ static char* progname;
 int main(int argc, char** argv) {
 
 	parse_args(argc, argv);
+
+    key_t key = 1525669;
+    int shmid;
+
+    if ((shmid = shmget (key, sizeof(struct sm_data), IPC_CREAT | 0660)) == -1) {
+        bail_out(EXIT_FAILURE, "create shared memory");
+    }
+
+    struct sm_data *data;
+
+    if((data = (struct sm_data*)shmat(shmid, 0, 0)) == NULL) {
+        bail_out(EXIT_FAILURE, "attatch shared memory");
+    }
+
+    data->c_set = 0;
+    data->cur = 0;
+
+    while(true) {
+        if(data->c_set) {
+            fprintf(stderr, "client has set data");
+            data->c_set = false;
+        }
+    }
 
 	exit(EXIT_SUCCESS);	
 }
