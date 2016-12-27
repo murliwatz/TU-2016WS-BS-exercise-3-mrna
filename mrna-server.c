@@ -16,35 +16,23 @@
 #include <sys/types.h>
 #include <sys/ipc.h> 
 #include <sys/shm.h>
+#include <sys/stat.h>
+#include <semaphore.h>
+#include <fcntl.h> 
+#include <sys/mman.h>
 #include "mrna-server.h"
-
-/** struct for shared memory */
-static struct sm_data {
-    bool c_set; /* 1 - client has set the data, 0 - server has set the data */
-    int pos_start;
-    int pos_end;
-    char payload[4096];
-} sm_data;
-
-/** name of this program */
-static char* progname; 
 
 int main(int argc, char** argv) {
 
 	parse_args(argc, argv);
 
-    key_t key = 1525669;
-    int shmid;
+    data = &sm_data;
 
-    if ((shmid = shmget (key, sizeof(struct sm_data), IPC_CREAT | 0660)) == -1) {
-        bail_out(EXIT_FAILURE, "create shared memory");
+    if((sem = sem_open(SEM_NAME, O_CREAT | O_EXCL, 0600, 1)) == SEM_FAILED) {
+        bail_out(EXIT_FAILURE, "Semaphore %s cannot be created", SEM_NAME);
     }
 
-    struct sm_data *data = &sm_data;
-
-    if((data = (struct sm_data*)shmat(shmid, 0, 0)) == NULL) {
-        bail_out(EXIT_FAILURE, "attatch shared memory");
-    }
+    allocate_resources();
 
     data->c_set = 0;
     data->pos_start = 0;
@@ -54,11 +42,11 @@ int main(int argc, char** argv) {
 
     while(true) {
         if(data->c_set) {
-            fprintf(stderr, "client has set data\n");
+           (void) fprintf(stderr, "client has set data\n");
 
             int pos[2];
 
-            fprintf(stderr, "server received from client: %s\n", data->payload);
+            (void) fprintf(stderr, "server received from client: %s\n", data->payload);
 
             pos[0] = data->pos_start;
             pos[1] = data->pos_end;
@@ -69,7 +57,7 @@ int main(int argc, char** argv) {
                 }
             }
 
-            fprintf(stderr, "client sends to client %s %d %d\n", mrna, pos[0], pos[1]);
+            (void) fprintf(stderr, "client sends to client %s %d %d\n", mrna, pos[0], pos[1]);
 
 
             data->pos_start = pos[0];
@@ -78,6 +66,8 @@ int main(int argc, char** argv) {
             data->c_set = false;
         }
     }
+
+    free_resources();
 
 	exit(EXIT_SUCCESS);	
 }
@@ -121,9 +111,26 @@ static void parse_args(int argc, char** argv) {
 	while((opt = getopt(argc, argv, "")) != -1) {
 		switch(opt) {
 			default:
-				bail_out(EXIT_FAILURE, "USAGE: mrna-server");		
+				bail_out(EXIT_FAILURE, "USAGE: %s", progname);		
 		}
 	}
+}
+
+/**
+ *  @brief Allocates shared memory
+ */
+static void allocate_resources(void) {
+    if ((shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, PERMISSIONS)) < 0) {
+        bail_out(EXIT_FAILURE, "create shared memory");
+    }
+
+    if(ftruncate(shm_fd, sizeof(struct sm_data)) < 0) {
+        bail_out(EXIT_FAILURE, "allocating memory");
+    }
+
+    if((data = (struct sm_data *)mmap(NULL, sizeof(struct sm_data), PROT_WRITE | PROT_READ, MAP_SHARED, shm_fd, 0 )) == NULL) {
+        bail_out(EXIT_FAILURE, "map shared memory");
+    }
 }
 
 /**
@@ -131,6 +138,27 @@ static void parse_args(int argc, char** argv) {
  */
 static void free_resources(void) {
 
+    if(sem_close(sem) < 0) {
+       (void) fprintf(stderr, "close semaphore");
+    }
+    
+    if(sem_unlink(SEM_NAME) < 0) {
+       (void) fprintf(stderr, "unlink semaphore");
+    }
+
+    if(data != NULL) {
+        if(munmap(data, MAX_DATA) < 0) {
+           (void) fprintf(stderr, "unmap shared memory");
+        }
+    }
+    if(shm_unlink(SHM_NAME) < 0) {
+       (void) fprintf(stderr, "unlink shared memory");
+    }
+    if(shm_fd != -1) {
+        if(close(shm_fd) < 0) {
+           (void) fprintf(stderr, "close shared memory fd");
+        }
+    }
 }
 
 /*

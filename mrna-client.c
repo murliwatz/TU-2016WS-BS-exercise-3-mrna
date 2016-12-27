@@ -16,18 +16,11 @@
 #include <sys/types.h>
 #include <sys/ipc.h> 
 #include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <semaphore.h>
+#include <fcntl.h>
 #include "mrna-client.h"
-
-/** struct for shared memory */
-static struct sm_data {
-    bool c_set; /* 1 - client has set the data, 0 - server has set the data */
-    int pos_start;
-    int pos_end;
-    char payload[4096];
-} sm_data;
-
-/** name of this program */
-static char* progname;
 
 int main(int argc, char** argv) {
 
@@ -37,21 +30,14 @@ int main(int argc, char** argv) {
 
 	print_commands();
 
-	key_t key = 1525669;
-    int shmid;
+	data = &sm_data;
 
-    if ((shmid = shmget (key, sizeof(struct sm_data), 0)) == -1) {
-        bail_out(EXIT_FAILURE, "create shared memory");
-    }
+	if((sem = sem_open(SEM_NAME, 0)) == SEM_FAILED) {
+		bail_out(EXIT_FAILURE, "Semaphore %s doesn't exist", SEM_NAME);
+	}
 
-    struct sm_data *data = &sm_data;
+    allocate_resources();
 
-    if((data = shmat(shmid, 0, 0)) == NULL) {
-        bail_out(EXIT_FAILURE, "attatch shared memory");
-    }
-
-	char buffer[4096];
-	int pos[2];
 	pos[0] = 0;
 	pos[1] = 0;
 
@@ -75,10 +61,14 @@ int main(int argc, char** argv) {
 		}
 
 		if(arg == 's') {
+
+			if(sem_wait(sem) < 0) {
+				bail_out(EXIT_FAILURE, "waiting for semaphore");
+			}
 			
 			fprintf(stdout, "Enter new mRNA sequence. (Newline to end input): ");
 
-			if(fgets(buffer, 4096, stdin) == NULL) {
+			if(fgets(buffer, MAX_DATA, stdin) == NULL) {
 				bail_out(EXIT_FAILURE, "read line");
 			}
 
@@ -89,11 +79,22 @@ int main(int argc, char** argv) {
 				}
 			}
 
+			if(sem_post(sem) < 0) {
+				bail_out(EXIT_FAILURE, "increment semaphore");
+			}
+
 		}
 
-		if(arg == 'n') { 
+		if(arg == 'n') {
 
-			memcpy(data->payload, buffer, 4096);
+			if(sem_wait(sem) < 0) {
+				bail_out(EXIT_FAILURE, "waiting for semaphore");
+			}
+
+			if(memcpy(data->payload, buffer, MAX_DATA) < 0) {
+				bail_out(EXIT_FAILURE, "copying data in shared memory");
+			}
+
 			data->pos_start = pos[0];
     		data->pos_end = pos[1];
 			data->c_set = 1;
@@ -108,6 +109,10 @@ int main(int argc, char** argv) {
 			} else {
 				fprintf(stdout, "Protein sequence found [%d/%lu] to [%d/%lu]: %s \n", data->pos_start, strlen(buffer), data->pos_end, strlen(buffer), data->payload);
 			}
+
+			if(sem_post(sem) < 0) {
+				bail_out(EXIT_FAILURE, "increment semaphore");
+			}
 		
 		}
 
@@ -116,7 +121,13 @@ int main(int argc, char** argv) {
 			pos[1] = 0;
 		}
 
+		if(sem_post(sem) < 0) {
+			bail_out(EXIT_FAILURE, "increment semaphore");
+		}
+
 	}
+
+	free_resources();
 
 	exit(EXIT_SUCCESS);	
 }
@@ -160,16 +171,43 @@ static void parse_args(int argc, char** argv) {
 	while((opt = getopt(argc, argv, "")) != -1) {
 		switch(opt) {
 			default:
-				bail_out(EXIT_FAILURE, "USAGE: mrna-client");		
+				bail_out(EXIT_FAILURE, "USAGE: %s", progname);		
 		}
 	}
+}
+
+/**
+ *  @brief Allocates shared memory
+ */
+static void allocate_resources(void) {
+	if ((shm_fd = shm_open(SHM_NAME, O_RDWR, PERMISSIONS)) < 0) {
+        bail_out(EXIT_FAILURE, "create shared memory");
+    }
+
+    if((data = (struct sm_data *)mmap(NULL, sizeof(struct sm_data), PROT_WRITE | PROT_READ, MAP_SHARED, shm_fd, 0 )) == NULL) {
+        bail_out(EXIT_FAILURE, "map shared memory");
+    }
 }
 
 /**
  *  @brief Free allocated resources
  */
 static void free_resources(void) {
-	
+
+	if(sem_close(sem) < 0) {
+		fprintf(stderr, "close semaphore");
+	}
+
+	if(data != NULL) {
+        if(munmap(data, MAX_DATA) < 0) {
+           (void) fprintf(stderr, "unmap shared memory");
+        }
+    }
+    if(shm_fd != -1) {
+        if(close(shm_fd) < 0) {
+           (void) fprintf(stderr, "close shared memory fd");
+        }
+    }
 }
 
 /*
