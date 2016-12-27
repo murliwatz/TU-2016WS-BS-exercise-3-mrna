@@ -13,9 +13,12 @@
 #define MAX_DATA (4096)
 #define PERMISSIONS (0600)
 
-int shm_fd = -1;
+static int shm_fd = -1;
 
-sem_t *sem;
+static sem_t *sem;
+
+static int quit = 0;
+static int decr = 0;
 
 /** struct for shared memory */
 static struct sm_data {
@@ -25,10 +28,10 @@ static struct sm_data {
     char payload[MAX_DATA];
 } sm_data;
 
-struct sm_data *data;
+static struct sm_data *data;
 
-char buffer[MAX_DATA];
-int pos[2];
+static char buffer[MAX_DATA];
+static int pos[2];
 
 /** name of this program */
 static char* progname;
@@ -38,6 +41,8 @@ static void bail_out(int exitcode, const char *fmt, ...);
 static void parse_args(int argc, char** argv);
 
 static void print_commands(void);
+
+static void signal_handler(int sig);
 
 static void allocate_resources(void);
 

@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/ipc.h> 
@@ -28,6 +29,13 @@ int main(int argc, char** argv) {
 
 	parse_args(argc, argv);
 
+	if(signal(SIGINT, signal_handler) == SIG_ERR) {
+        bail_out(EXIT_FAILURE, "set signal SIGINT");
+    }
+    if(signal(SIGTERM, signal_handler) == SIG_ERR) {
+        bail_out(EXIT_FAILURE, "set signal SIGINT");
+    }
+
 	print_commands();
 
 	data = &sm_data;
@@ -41,7 +49,7 @@ int main(int argc, char** argv) {
 	pos[0] = 0;
 	pos[1] = 0;
 
-	while(arg != 'q') {
+	while(!quit && arg != 'q') {
 
 		fprintf(stdout, "Enter new command. (Enter to end input): ");
 
@@ -62,19 +70,27 @@ int main(int argc, char** argv) {
 
 		if(arg == 's') {
 
-			if(sem_wait(sem) < 0) {
-				bail_out(EXIT_FAILURE, "waiting for semaphore");
-			}
-			
 			fprintf(stdout, "Enter new mRNA sequence. (Newline to end input): ");
 
 			if(fgets(buffer, MAX_DATA, stdin) == NULL) {
 				bail_out(EXIT_FAILURE, "read line");
 			}
 
+			if(sem_wait(sem) < 0) {
+				if(errno == EINTR) {
+					continue;
+				} else {
+					bail_out(EXIT_FAILURE, "waiting for semaphore");
+				}
+			}
+
+			decr++;
+
 			for(int i = 0; buffer[i] != '\0'; i++) {
 				if(buffer[i] != 'A' && buffer[i] != 'C' && buffer[i] != 'G' && buffer[i] != 'U') {
-					memmove(&buffer[i], &buffer[i + 1], strlen(buffer) - i);
+					if(memmove(&buffer[i], &buffer[i + 1], strlen(buffer) - i) == NULL) {
+						bail_out(EXIT_FAILURE, "removing invalid characters");
+					}
 					i = 0; 
 				}
 			}
@@ -83,23 +99,48 @@ int main(int argc, char** argv) {
 				bail_out(EXIT_FAILURE, "increment semaphore");
 			}
 
+			decr--;
+
 		}
 
 		if(arg == 'n') {
 
 			if(sem_wait(sem) < 0) {
-				bail_out(EXIT_FAILURE, "waiting for semaphore");
+				if(errno == EINTR) {
+					continue;
+				} else {
+					bail_out(EXIT_FAILURE, "waiting for semaphore");
+				}
 			}
 
-			if(memcpy(data->payload, buffer, MAX_DATA) < 0) {
+			decr++;
+
+			if(memcpy(data->payload, buffer, MAX_DATA) == NULL) {
 				bail_out(EXIT_FAILURE, "copying data in shared memory");
 			}
 
 			data->pos_start = pos[0];
     		data->pos_end = pos[1];
-			data->c_set = 1;
+
+    		data->c_set = true;
+
+    		if(sem_post(sem) < 0) {
+				bail_out(EXIT_FAILURE, "increment semaphore");
+			}
+
+			decr--;
 
 			while(data->c_set);
+
+			if(sem_wait(sem) < 0) {
+				if(errno == EINTR) {
+					continue;
+				} else {
+					bail_out(EXIT_FAILURE, "waiting for semaphore");
+				}
+			}
+
+			decr++;
 
 			pos[0] = data->pos_end;
 			pos[1] = data->pos_end;
@@ -113,6 +154,8 @@ int main(int argc, char** argv) {
 			if(sem_post(sem) < 0) {
 				bail_out(EXIT_FAILURE, "increment semaphore");
 			}
+
+			decr--;
 		
 		}
 
@@ -130,6 +173,15 @@ int main(int argc, char** argv) {
 	free_resources();
 
 	exit(EXIT_SUCCESS);	
+}
+
+/*
+ * @brief Signal handler function
+ */
+static void signal_handler(int sig) {
+    (void) fprintf(stderr, "\n<interupted>\n");
+    free_resources();
+    exit(EXIT_SUCCESS);
 }
 
 /**
@@ -194,8 +246,14 @@ static void allocate_resources(void) {
  */
 static void free_resources(void) {
 
+	if(decr == 1) {
+		if(sem_post(sem) < 0) {
+			(void) fprintf(stderr, "increment semaphore");
+		}
+	}
+
 	if(sem_close(sem) < 0) {
-		fprintf(stderr, "close semaphore");
+		(void) fprintf(stderr, "close semaphore");
 	}
 
 	if(data != NULL) {

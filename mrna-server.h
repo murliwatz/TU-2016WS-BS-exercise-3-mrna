@@ -13,11 +13,13 @@
 #define MAX_DATA (4096)
 #define PERMISSIONS (0600)
 
-int shm_fd = -1;
+static int shm_fd = -1;
 
-sem_t *sem;
+static sem_t *sem;
 
-struct sm_data *data;
+volatile sig_atomic_t quit = 0;
+
+static struct sm_data *data;
 
 /** struct for shared memory */
 static struct sm_data {
@@ -37,6 +39,8 @@ static void parse_args(int argc, char** argv);
 static void allocate_resources(void);
 
 static void free_resources(void);
+
+static void signal_handler(int sig);
 
 static char get_codon(char *bases);
 

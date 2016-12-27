@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/ipc.h> 
@@ -25,6 +26,13 @@
 int main(int argc, char** argv) {
 
 	parse_args(argc, argv);
+
+    if(signal(SIGINT, signal_handler) == SIG_ERR) {
+        bail_out(EXIT_FAILURE, "set signal SIGINT");
+    }
+    if(signal(SIGTERM, signal_handler) == SIG_ERR) {
+        bail_out(EXIT_FAILURE, "set signal SIGINT");
+    }
 
     data = &sm_data;
 
@@ -40,9 +48,19 @@ int main(int argc, char** argv) {
 
     char *mrna = NULL;
 
-    while(true) {
+    while(!quit) {
+
         if(data->c_set) {
-           (void) fprintf(stderr, "client has set data\n");
+
+            if(sem_wait(sem) < 0) {
+                if(errno == EINTR) {
+                    continue;
+                } else {
+                    bail_out(EXIT_FAILURE, "waiting for semaphore");
+                }
+            }
+
+            (void) fprintf(stderr, "client has set data\n");
 
             int pos[2];
 
@@ -64,6 +82,10 @@ int main(int argc, char** argv) {
             data->pos_end = pos[1];
 
             data->c_set = false;
+
+            if(sem_post(sem) < 0) {
+                bail_out(EXIT_FAILURE, "increment semaphore");
+            }
         }
     }
 
@@ -159,6 +181,14 @@ static void free_resources(void) {
            (void) fprintf(stderr, "close shared memory fd");
         }
     }
+}
+
+/*
+ * @brief Signal handler function
+ */
+static void signal_handler(int sig) {
+    (void) fprintf(stderr, "\n<interupted>\n");
+    quit = 1;
 }
 
 /*
