@@ -27,11 +27,15 @@ int main(int argc, char** argv) {
 
 	parse_args(argc, argv);
 
-    if(signal(SIGINT, signal_handler) == SIG_ERR) {
+    act.sa_handler = signal_handler;
+    sigemptyset (&act.sa_mask);
+    act.sa_flags = 0;
+
+    if(sigaction (SIGINT, &act, NULL) < 0) {
         bail_out(EXIT_FAILURE, "set signal SIGINT");
     }
-    if(signal(SIGTERM, signal_handler) == SIG_ERR) {
-        bail_out(EXIT_FAILURE, "set signal SIGINT");
+    if(sigaction (SIGTERM, &act, NULL) < 0) {
+        bail_out(EXIT_FAILURE, "set signal SIGTERM");
     }
 
     data = &sm_data;
@@ -40,9 +44,16 @@ int main(int argc, char** argv) {
         bail_out(EXIT_FAILURE, "Semaphore %s cannot be created", SEM_NAME);
     }
 
+    if((sem_req = sem_open(SEM_NAME_REQ, O_CREAT | O_EXCL, 0600, 0)) == SEM_FAILED) {
+        bail_out(EXIT_FAILURE, "Semaphore %s cannot be created", SEM_NAME_REQ);
+    }
+
+    if((sem_res = sem_open(SEM_NAME_RES, O_CREAT | O_EXCL, 0600, 0)) == SEM_FAILED) {
+        bail_out(EXIT_FAILURE, "Semaphore %s cannot be created", SEM_NAME_RES);
+    }
+
     allocate_resources();
 
-    data->c_set = 0;
     data->pos_start = 0;
     data->pos_end = 0;
 
@@ -50,43 +61,45 @@ int main(int argc, char** argv) {
 
     while(!quit) {
 
-        if(data->c_set) {
+        if(sem_wait(sem_req) < 0) {
+            if(errno == EINTR) continue;
+            bail_out(EXIT_FAILURE, "waiting for semaphore");
+        }
 
-            if(sem_wait(sem) < 0) {
-                if(errno == EINTR) {
-                    continue;
-                } else {
-                    bail_out(EXIT_FAILURE, "waiting for semaphore");
-                }
-            }
+        if(sem_wait(sem) < 0) {
+            if(errno == EINTR) continue;
+            bail_out(EXIT_FAILURE, "waiting for semaphore");
+        }
 
-            (void) fprintf(stderr, "client has set data\n");
+        (void) fprintf(stderr, "client has set data\n");
 
-            int pos[2];
+        int pos[2];
 
-            (void) fprintf(stderr, "server received from client: %s\n", data->payload);
+        (void) fprintf(stderr, "server received from client: %s\n", data->payload);
 
-            pos[0] = data->pos_start;
-            pos[1] = data->pos_end;
+        pos[0] = data->pos_start;
+        pos[1] = data->pos_end;
 
-            if((mrna = get_mrna(data->payload, pos)) != NULL) {
-                if(memcpy(data->payload, mrna, strlen(mrna) + 1) == NULL) {
-                    bail_out(EXIT_FAILURE, "copy to shared memory");
-                }
-            }
-
-            (void) fprintf(stderr, "client sends to client %s %d %d\n", mrna, pos[0], pos[1]);
-
-
-            data->pos_start = pos[0];
-            data->pos_end = pos[1];
-
-            data->c_set = false;
-
-            if(sem_post(sem) < 0) {
-                bail_out(EXIT_FAILURE, "increment semaphore");
+        if((mrna = get_mrna(data->payload, pos)) != NULL) {
+            if(memcpy(data->payload, mrna, strlen(mrna) + 1) == NULL) {
+                bail_out(EXIT_FAILURE, "copy to shared memory");
             }
         }
+
+        (void) fprintf(stderr, "client sends to client %s %d %d\n", mrna, pos[0], pos[1]);
+
+
+        data->pos_start = pos[0];
+        data->pos_end = pos[1];
+
+        if(sem_post(sem) < 0) {
+            bail_out(EXIT_FAILURE, "increment semaphore");
+        }
+
+        if(sem_post(sem_res) < 0) {
+            bail_out(EXIT_FAILURE, "increment semaphore");
+        }
+  
     }
 
     free_resources();
@@ -161,24 +174,40 @@ static void allocate_resources(void) {
 static void free_resources(void) {
 
     if(sem_close(sem) < 0) {
-       (void) fprintf(stderr, "close semaphore");
+       (void) fprintf(stderr, "close semaphore\n");
+    }
+
+    if(sem_close(sem_req) < 0) {
+       (void) fprintf(stderr, "close semaphore\n");
+    }
+
+    if(sem_close(sem_res) < 0) {
+       (void) fprintf(stderr, "close semaphore\n");
     }
     
     if(sem_unlink(SEM_NAME) < 0) {
-       (void) fprintf(stderr, "unlink semaphore");
+       (void) fprintf(stderr, "unlink semaphore\n");
+    }
+
+    if(sem_unlink(SEM_NAME_REQ) < 0) {
+       (void) fprintf(stderr, "unlink semaphore\n");
+    }
+
+    if(sem_unlink(SEM_NAME_RES) < 0) {
+       (void) fprintf(stderr, "unlink semaphore\n");
     }
 
     if(data != NULL) {
         if(munmap(data, MAX_DATA) < 0) {
-           (void) fprintf(stderr, "unmap shared memory");
+           (void) fprintf(stderr, "unmap shared memory\n");
         }
     }
     if(shm_unlink(SHM_NAME) < 0) {
-       (void) fprintf(stderr, "unlink shared memory");
+       (void) fprintf(stderr, "unlink shared memory\n");
     }
     if(shm_fd != -1) {
         if(close(shm_fd) < 0) {
-           (void) fprintf(stderr, "close shared memory fd");
+           (void) fprintf(stderr, "close shared memory fd\n");
         }
     }
 }

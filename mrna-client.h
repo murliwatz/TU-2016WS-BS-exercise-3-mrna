@@ -9,20 +9,25 @@
 #define MRNA_CLIENT_H_
 
 #define SEM_NAME "/1525669"
+#define SEM_NAME_REQ "/1525669_req"
+#define SEM_NAME_RES "/1525669_res"
 #define SHM_NAME "/1525669"
 #define MAX_DATA (4096)
 #define PERMISSIONS (0600)
 
 static int shm_fd = -1;
 
-static sem_t *sem;
+static struct sigaction act;
 
-static int quit = 0;
+static sem_t *sem;
+static sem_t *sem_req;
+static sem_t *sem_res;
+
+volatile sig_atomic_t quit = 0;
 static int decr = 0;
 
 /** struct for shared memory */
 static struct sm_data {
-    bool c_set; /* 1 - client has set the data, 0 - server has set the data */
     int pos_start;
     int pos_end;
     char payload[MAX_DATA];

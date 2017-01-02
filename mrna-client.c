@@ -29,11 +29,17 @@ int main(int argc, char** argv) {
 
 	parse_args(argc, argv);
 
-	if(signal(SIGINT, signal_handler) == SIG_ERR) {
+	act.sa_handler = signal_handler;
+    if(sigemptyset (&act.sa_mask) < 0) {
+        bail_out(EXIT_FAILURE, "set sig'mask empty");
+    }
+    act.sa_flags = 0;
+
+    if(sigaction (SIGINT, &act, NULL) < 0) {
         bail_out(EXIT_FAILURE, "set signal SIGINT");
     }
-    if(signal(SIGTERM, signal_handler) == SIG_ERR) {
-        bail_out(EXIT_FAILURE, "set signal SIGINT");
+    if(sigaction (SIGTERM, &act, NULL) < 0) {
+        bail_out(EXIT_FAILURE, "set signal SIGTERM");
     }
 
 	print_commands();
@@ -43,6 +49,14 @@ int main(int argc, char** argv) {
 	if((sem = sem_open(SEM_NAME, 0)) == SEM_FAILED) {
 		bail_out(EXIT_FAILURE, "Semaphore %s doesn't exist", SEM_NAME);
 	}
+
+	if((sem_req = sem_open(SEM_NAME_REQ, 0)) == SEM_FAILED) {
+        bail_out(EXIT_FAILURE, "Semaphore %s cannot be created", SEM_NAME_REQ);
+    }
+
+    if((sem_res = sem_open(SEM_NAME_RES, 0)) == SEM_FAILED) {
+        bail_out(EXIT_FAILURE, "Semaphore %s cannot be created", SEM_NAME_RES);
+    }
 
     allocate_resources();
 
@@ -76,30 +90,14 @@ int main(int argc, char** argv) {
 				bail_out(EXIT_FAILURE, "read line");
 			}
 
-			if(sem_wait(sem) < 0) {
-				if(errno == EINTR) {
-					continue;
-				} else {
-					bail_out(EXIT_FAILURE, "waiting for semaphore");
-				}
-			}
-
-			decr++;
-
 			for(int i = 0; buffer[i] != '\0'; i++) {
 				if(buffer[i] != 'A' && buffer[i] != 'C' && buffer[i] != 'G' && buffer[i] != 'U') {
 					if(memmove(&buffer[i], &buffer[i + 1], strlen(buffer) - i) == NULL) {
-						bail_out(EXIT_FAILURE, "removing invalid characters");
+							bail_out(EXIT_FAILURE, "removing invalid characters");
 					}
-					i = 0; 
+					i = -1;
 				}
 			}
-
-			if(sem_post(sem) < 0) {
-				bail_out(EXIT_FAILURE, "increment semaphore");
-			}
-
-			decr--;
 
 		}
 
@@ -122,7 +120,9 @@ int main(int argc, char** argv) {
 			data->pos_start = pos[0];
     		data->pos_end = pos[1];
 
-    		data->c_set = true;
+    		if(sem_post(sem_req) < 0) {
+				bail_out(EXIT_FAILURE, "increment semaphore");
+			}
 
     		if(sem_post(sem) < 0) {
 				bail_out(EXIT_FAILURE, "increment semaphore");
@@ -130,7 +130,13 @@ int main(int argc, char** argv) {
 
 			decr--;
 
-			while(data->c_set);
+			if(sem_wait(sem_res) < 0) {
+				if(errno == EINTR) {
+					continue;
+				} else {
+					bail_out(EXIT_FAILURE, "waiting for semaphore");
+				}
+			}
 
 			if(sem_wait(sem) < 0) {
 				if(errno == EINTR) {
@@ -162,10 +168,6 @@ int main(int argc, char** argv) {
 		if(arg == 'r') {
 			pos[0] = 0;
 			pos[1] = 0;
-		}
-
-		if(sem_post(sem) < 0) {
-			bail_out(EXIT_FAILURE, "increment semaphore");
 		}
 
 	}
@@ -248,22 +250,30 @@ static void free_resources(void) {
 
 	if(decr == 1) {
 		if(sem_post(sem) < 0) {
-			(void) fprintf(stderr, "increment semaphore");
+			(void) fprintf(stderr, "increment semaphore\n");
 		}
 	}
 
 	if(sem_close(sem) < 0) {
-		(void) fprintf(stderr, "close semaphore");
+		(void) fprintf(stderr, "close semaphore\n");
+	}
+
+	if(sem_close(sem_req) < 0) {
+		(void) fprintf(stderr, "close semaphore\n");
+	}
+
+	if(sem_close(sem_res) < 0) {
+		(void) fprintf(stderr, "close semaphore\n");
 	}
 
 	if(data != NULL) {
         if(munmap(data, MAX_DATA) < 0) {
-           (void) fprintf(stderr, "unmap shared memory");
+           (void) fprintf(stderr, "unmap shared memory\n");
         }
     }
     if(shm_fd != -1) {
         if(close(shm_fd) < 0) {
-           (void) fprintf(stderr, "close shared memory fd");
+           (void) fprintf(stderr, "close shared memory fd\n");
         }
     }
 }
