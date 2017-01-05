@@ -2,7 +2,7 @@
  * @file mrna-server.h
  * @brief header file for the implementation of mrna-server
  * @author Paul Pröll, 1525669
- * @date 2016-11-15
+ * @date 2016-01-05
  */
 
 #ifndef MRNA_SERVER_H_
